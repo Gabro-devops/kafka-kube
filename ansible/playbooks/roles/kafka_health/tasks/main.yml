@@ -1,0 +1,72 @@
+---
+- name: Get Kafka cluster
+  kubernetes.core.k8s_info:
+    api_version: kafka.strimzi.io/v1beta2
+    kind: Kafka
+    name: "{{ kafka_cluster_name }}"
+    namespace: "{{ k8s_namespace }}"
+  register: kafka_cluster
+
+- name: Check cluster exists
+  assert:
+    that:
+      - kafka_cluster.resources | length > 0
+    fail_msg: "Kafka cluster {{ kafka_cluster_name }} not found!"
+    success_msg: "Kafka cluster found"
+
+- name: Get cluster conditions
+  debug:
+    msg: "{{ item.type }}: {{ item.status }}"
+  loop: "{{ kafka_cluster.resources[0].status.conditions | default([]) }}"
+  loop_control:
+    label: "{{ item.type }}"
+  when: kafka_cluster.resources[0].status.conditions is defined
+
+- name: Get KafkaNodePool
+  kubernetes.core.k8s_info:
+    api_version: kafka.strimzi.io/v1beta2
+    kind: KafkaNodePool
+    name: "{{ kafka_nodepool_name }}"
+    namespace: "{{ k8s_namespace }}"
+  register: nodepool
+
+- name: Show NodePool
+  debug:
+    msg: "NodePool {{ kafka_nodepool_name }}: replicas={{ nodepool.resources[0].status.replicas | default(0) }}"
+  when: nodepool.resources | length > 0
+
+- name: Get Kafka pods
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Pod
+    namespace: "{{ k8s_namespace }}"
+    label_selectors:
+      - strimzi.io/cluster={{ kafka_cluster_name }}
+      - strimzi.io/kind=Kafka
+  register: kafka_pods
+
+- name: Show pods
+  debug:
+    msg: "{{ item.metadata.name }}: {{ item.status.phase }}"
+  loop: "{{ kafka_pods.resources }}"
+  loop_control:
+    label: "{{ item.metadata.name }}"
+
+- name: Get KafkaUsers
+  kubernetes.core.k8s_info:
+    api_version: kafka.strimzi.io/v1beta2
+    kind: KafkaUser
+    namespace: "{{ k8s_namespace }}"
+  register: kafka_users
+
+- name: Health Report
+  debug:
+    msg:
+      - "============================================"
+      - "   KAFKA HEALTH CHECK (KRaft)"
+      - "============================================"
+      - "Cluster: {{ kafka_cluster_name }}"
+      - "Mode: KRaft (no ZooKeeper)"
+      - "Pods: {{ kafka_pods.resources | length }}"
+      - "Users: {{ kafka_users.resources | length }}"
+      - "============================================"

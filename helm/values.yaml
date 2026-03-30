@@ -1,0 +1,237 @@
+global:
+  namespace: kafka-lab
+
+# ============================================
+# VAULT SECRET MANAGEMENT
+# ============================================
+vault:
+  enabled: true
+  address: "http://vault.vault-system.svc.cluster.local:8200"
+  kvPath: "secret"
+  auth:
+    method: kubernetes
+    serviceAccount: vault-auth
+    role: kafka-lab
+  refreshInterval: 1h
+
+# Strimzi Kafka Cluster (KRaft mode - no ZooKeeper)
+kafka:
+  enabled: true
+  name: kafka-cluster
+  version: "4.1.0"
+
+  nodePool:
+    name: kafka-nodes
+    replicas: 3
+    roles:
+      - controller
+      - broker
+    storage:
+      type: persistent-claim
+      size: 5Gi
+      deleteClaim: true
+    resources:
+      requests:
+        memory: "1Gi"
+        cpu: "500m"
+      limits:
+        memory: "2Gi"
+        cpu: "1000m"
+
+  listeners:
+    plain:
+      enabled: true
+      port: 9092
+    tls:
+      enabled: true
+      port: 9093
+      authentication: scram-sha-512
+
+  config:
+    offsetsTopicReplicationFactor: 3
+    transactionStateLogReplicationFactor: 3
+    transactionStateLogMinIsr: 2
+    defaultReplicationFactor: 3
+    minInsyncReplicas: 2
+
+# Kafka Users (SCRAM-SHA-512)
+kafkaUsers:
+  - name: admin
+    type: scram-sha-512
+    vaultSecretPath: kafka/users/admin
+    acls:
+      - resource:
+          type: topic
+          name: "*"
+          patternType: literal
+        operations: ["All"]
+      - resource:
+          type: group
+          name: "*"
+          patternType: literal
+        operations: ["All"]
+      - resource:
+          type: cluster
+        operations: ["All"]
+  - name: producer-user
+    type: scram-sha-512
+    vaultSecretPath: kafka/users/producer-user
+    acls:
+      - resource:
+          type: topic
+          name: "*"
+          patternType: literal
+        operations: ["Write", "Describe", "Create"]
+  - name: consumer-user
+    type: scram-sha-512
+    vaultSecretPath: kafka/users/consumer-user
+    acls:
+      - resource:
+          type: topic
+          name: "*"
+          patternType: literal
+        operations: ["Read", "Describe"]
+      - resource:
+          type: group
+          name: "*"
+          patternType: literal
+        operations: ["Read"]
+
+# ============================================
+# KAFKA CONNECT
+# ============================================
+kafkaConnect:
+  enabled: true
+  name: kafka-connect
+  replicas: 1
+
+  build:
+    enabled: false
+    output:
+      image: my-registry/kafka-connect:latest
+      pushSecret: docker-registry-credentials
+    plugins:
+      - name: debezium-postgres
+        artifacts:
+          - type: maven
+            group: io.debezium
+            artifact: debezium-connector-postgres
+            version: 2.5.0.Final
+      - name: jdbc-connector
+        artifacts:
+          - type: maven
+            group: io.confluent
+            artifact: kafka-connect-jdbc
+            version: 10.7.4
+      - name: elasticsearch-connector
+        artifacts:
+          - type: maven
+            group: io.confluent
+            artifact: kafka-connect-elasticsearch
+            version: 14.0.12
+      - name: s3-connector
+        artifacts:
+          - type: maven
+            group: io.confluent
+            artifact: kafka-connect-s3
+            version: 10.5.7
+
+  config:
+    keyConverter: org.apache.kafka.connect.json.JsonConverter
+    valueConverter: org.apache.kafka.connect.json.JsonConverter
+    keyConverterSchemasEnable: false
+    valueConverterSchemasEnable: false
+    replicationFactor: 3
+    additional:
+      tasks.max: "10"
+      offset.flush.interval.ms: "10000"
+
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "250m"
+    limits:
+      memory: "1Gi"
+      cpu: "500m"
+
+  logging:
+    rootLevel: INFO
+
+  connectors: []
+
+# Kafka UI
+kafkaUi:
+  enabled: true
+  image: provectuslabs/kafka-ui:latest
+  service:
+    type: NodePort
+    nodePort: 30080
+
+# Monitoring
+monitoring:
+  enabled: true
+  prometheus:
+    image: prom/prometheus:latest
+    service:
+      type: NodePort
+      nodePort: 30090
+  grafana:
+    image: grafana/grafana:latest
+    service:
+      type: NodePort
+      nodePort: 30030
+    vaultSecretPath: kafka/monitoring/grafana
+
+# AWX
+awx:
+  enabled: true
+  service:
+    type: NodePort
+    nodePort: 30043
+
+# ============================================
+# JENKINS CI/CD
+# ============================================
+jenkins:
+  enabled: true
+  namespace: jenkins
+
+  image: gabrodevops/jenkins-kafka:1.0.0
+
+  vaultSecretPath: kafka/jenkins/admin
+
+  service:
+    type: NodePort
+    nodePort: 32000
+
+  persistence:
+    size: 10Gi
+
+  resources:
+    requests:
+      memory: "1Gi"
+      cpu: "500m"
+    limits:
+      memory: "3Gi"
+      cpu: "1000m"
+
+  jobs:
+    deployTopic:
+      enabled: true
+    deployUser:
+      enabled: true
+    healthCheck:
+      enabled: true
+      schedule: "H/30 * * * *"
+    consumerLag:
+      enabled: true
+
+# ============================================
+# KAFKA EXPORTER
+# ============================================
+kafkaExporter:
+  enabled: true
+  image: danielqsj/kafka-exporter:latest
+  service:
+    type: ClusterIP
+    port: 9308

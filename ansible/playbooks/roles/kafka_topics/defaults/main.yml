@@ -1,0 +1,7 @@
+---
+k8s_namespace: kafka-lab
+kafka_cluster_name: kafka-cluster
+kafka_topic_name: "test-topic"
+kafka_topic_partitions: 3
+kafka_topic_replicas: 3
+kafka_topic_action: "create"

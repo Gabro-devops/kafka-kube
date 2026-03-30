@@ -1,0 +1,4 @@
+---
+k8s_namespace: kafka-lab
+kafka_cluster_name: kafka-cluster
+kafka_nodepool_name: kafka-nodes

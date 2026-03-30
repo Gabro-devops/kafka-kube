@@ -1,0 +1,64 @@
+{{- if .Values.kafkaExporter.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka-exporter
+  namespace: {{ include "kafka-lab.namespace" . }}
+  labels:
+    app: kafka-exporter
+    {{- include "kafka-lab.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kafka-exporter
+  template:
+    metadata:
+      labels:
+        app: kafka-exporter
+    spec:
+      containers:
+        - name: kafka-exporter
+          image: {{ .Values.kafkaExporter.image }}
+          ports:
+            - containerPort: 9308
+          args:
+            - --kafka.server={{ include "kafka-lab.kafkaBootstrapPlain" . }}
+            - --sasl.enabled
+            - --sasl.mechanism=scram-sha512
+            - --sasl.username=admin
+            - --sasl.password=$(KAFKA_ADMIN_PASSWORD)
+            - --topic.filter=.*
+            - --group.filter=.*
+          env:
+            - name: KAFKA_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: admin-password
+                  key: password
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "200m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-exporter
+  namespace: {{ include "kafka-lab.namespace" . }}
+  labels:
+    app: kafka-exporter
+    {{- include "kafka-lab.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.kafkaExporter.service.type }}
+  ports:
+    - port: {{ .Values.kafkaExporter.service.port }}
+      targetPort: 9308
+      name: metrics
+  selector:
+    app: kafka-exporter
+{{- end }}

@@ -1,0 +1,36 @@
+---
+- name: Kafka Manage Users
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars_files:
+    - ../group_vars/all.yml
+
+  pre_tasks:
+    - name: Check params for create/delete
+      assert:
+        that:
+          - kafka_username is defined
+        fail_msg: "kafka_username is required!"
+      when: kafka_user_action | default('list') != 'list'
+
+    - name: Check password for create
+      assert:
+        that:
+          - kafka_password is defined
+        fail_msg: "kafka_password is required!"
+      when: kafka_user_action | default('list') == 'create'
+
+    - name: Banner
+      debug:
+        msg:
+          - "============================================"
+          - "   KAFKA MANAGE USERS"
+          - "============================================"
+          - "Action: {{ kafka_user_action | default('list') }}"
+          - "User: {{ kafka_username | default('all') }}"
+          - "============================================"
+
+  roles:
+    - role: kafka_users

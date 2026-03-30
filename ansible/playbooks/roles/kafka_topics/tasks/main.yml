@@ -1,0 +1,70 @@
+---
+- name: List topics
+  kubernetes.core.k8s_info:
+    api_version: kafka.strimzi.io/v1beta2
+    kind: KafkaTopic
+    namespace: "{{ k8s_namespace }}"
+  register: topics
+  when: kafka_topic_action == "list"
+
+- name: Show topics
+  debug:
+    msg: "Topic: {{ item.metadata.name }} (partitions: {{ item.spec.partitions }})"
+  loop: "{{ topics.resources | default([]) }}"
+  loop_control:
+    label: "{{ item.metadata.name }}"
+  when: kafka_topic_action == "list"
+
+- name: Create topic
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: kafka.strimzi.io/v1beta2
+      kind: KafkaTopic
+      metadata:
+        name: "{{ kafka_topic_name }}"
+        namespace: "{{ k8s_namespace }}"
+        labels:
+          strimzi.io/cluster: "{{ kafka_cluster_name }}"
+      spec:
+        partitions: "{{ kafka_topic_partitions }}"
+        replicas: "{{ kafka_topic_replicas }}"
+        config:
+          retention.ms: "604800000"
+  when: kafka_topic_action == "create"
+  register: topic_created
+
+- name: Topic created
+  debug:
+    msg: "Topic {{ kafka_topic_name }} created with {{ kafka_topic_partitions }} partitions"
+  when:
+    - kafka_topic_action == "create"
+    - topic_created is changed
+
+- name: Delete topic
+  kubernetes.core.k8s:
+    state: absent
+    api_version: kafka.strimzi.io/v1beta2
+    kind: KafkaTopic
+    name: "{{ kafka_topic_name }}"
+    namespace: "{{ k8s_namespace }}"
+  when: kafka_topic_action == "delete"
+
+- name: Describe topic
+  kubernetes.core.k8s_info:
+    api_version: kafka.strimzi.io/v1beta2
+    kind: KafkaTopic
+    name: "{{ kafka_topic_name }}"
+    namespace: "{{ k8s_namespace }}"
+  register: topic_info
+  when: kafka_topic_action == "describe"
+
+- name: Show topic info
+  debug:
+    msg:
+      - "Topic: {{ topic_info.resources[0].metadata.name }}"
+      - "Partitions: {{ topic_info.resources[0].spec.partitions }}"
+      - "Replicas: {{ topic_info.resources[0].spec.replicas }}"
+  when:
+    - kafka_topic_action == "describe"
+    - topic_info.resources | length > 0

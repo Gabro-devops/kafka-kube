@@ -1,0 +1,39 @@
+---
+- name: Get all users with ACLs
+  kubernetes.core.k8s_info:
+    api_version: kafka.strimzi.io/v1beta2
+    kind: KafkaUser
+    namespace: "{{ k8s_namespace }}"
+  register: all_users
+
+- name: Show all ACLs
+  debug:
+    msg:
+      - "User: {{ item.metadata.name }}"
+      - "ACLs: {{ item.spec.authorization.acls | default([]) | to_nice_yaml }}"
+  loop: "{{ all_users.resources }}"
+  loop_control:
+    label: "{{ item.metadata.name }}"
+  when: kafka_username == ""
+
+- name: Get specific user
+  kubernetes.core.k8s_info:
+    api_version: kafka.strimzi.io/v1beta2
+    kind: KafkaUser
+    name: "{{ kafka_username }}"
+    namespace: "{{ k8s_namespace }}"
+  register: specific_user
+  when: kafka_username != ""
+
+- name: Show user ACLs
+  debug:
+    msg:
+      - "User: {{ specific_user.resources[0].metadata.name }}"
+      - "ACLs: {{ specific_user.resources[0].spec.authorization.acls | default([]) | to_nice_yaml }}"
+  when:
+    - kafka_username != ""
+    - specific_user.resources | length > 0
+
+- name: Note
+  debug:
+    msg: "In Strimzi, ACLs are managed via KafkaUser CR spec.authorization.acls"

@@ -1,0 +1,82 @@
+---
+- name: Kafka Full Test Suite
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars_files:
+    - ../group_vars/all.yml
+
+  vars:
+    test_topic: "ansible-test-topic"
+    test_user: "ansible-test-user"
+    test_pass: "test-password-123"
+
+  pre_tasks:
+    - name: Banner
+      debug:
+        msg:
+          - "============================================"
+          - "   KAFKA FULL TEST - KRaft Mode"
+          - "============================================"
+          - "Cluster: {{ kafka_cluster_name }}"
+          - "Test Topic: {{ test_topic }}"
+          - "Test User: {{ test_user }}"
+          - "============================================"
+
+  tasks:
+    - name: "STEP 1: Health Check"
+      include_role:
+        name: kafka_health
+
+    - name: "STEP 2: Create Test Topic"
+      include_role:
+        name: kafka_topics
+      vars:
+        kafka_topic_name: "{{ test_topic }}"
+        kafka_topic_partitions: 3
+        kafka_topic_replicas: 3
+        kafka_topic_action: "create"
+
+    - name: "STEP 3: Create Test User"
+      include_role:
+        name: kafka_users
+      vars:
+        kafka_username: "{{ test_user }}"
+        kafka_password: "{{ test_pass }}"
+        kafka_user_action: "create"
+
+    - name: "STEP 4: Show ACLs"
+      include_role:
+        name: kafka_acl
+      vars:
+        kafka_username: "{{ test_user }}"
+
+    - name: "CLEANUP: Delete User"
+      include_role:
+        name: kafka_users
+      vars:
+        kafka_username: "{{ test_user }}"
+        kafka_user_action: "delete"
+      when: cleanup | default(false) | bool
+
+    - name: "CLEANUP: Delete Topic"
+      include_role:
+        name: kafka_topics
+      vars:
+        kafka_topic_name: "{{ test_topic }}"
+        kafka_topic_action: "delete"
+      when: cleanup | default(false) | bool
+
+  post_tasks:
+    - name: Report
+      debug:
+        msg:
+          - "============================================"
+          - "   FULL TEST COMPLETATO"
+          - "============================================"
+          - "  Kafka UI:   {{ kafka_ui_url }}"
+          - "  Grafana:    {{ grafana_url }}"
+          - "  Prometheus: {{ prometheus_url }}"
+          - "Per cleanup: -e cleanup=true"
+          - "============================================"
