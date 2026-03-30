@@ -1,0 +1,70 @@
+{{- if .Values.kafkaUi.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka-ui
+  namespace: {{ include "kafka-lab.namespace" . }}
+  labels:
+    app: kafka-ui
+    {{- include "kafka-lab.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kafka-ui
+  template:
+    metadata:
+      labels:
+        app: kafka-ui
+    spec:
+      containers:
+        - name: kafka-ui
+          image: {{ .Values.kafkaUi.image }}
+          ports:
+            - containerPort: 8080
+          env:
+            - name: KAFKA_CLUSTERS_0_NAME
+              value: kafka-cluster
+            - name: KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS
+              value: {{ include "kafka-lab.kafkaBootstrapPlain" . }}
+            - name: KAFKA_CLUSTERS_0_PROPERTIES_SECURITY_PROTOCOL
+              value: SASL_PLAINTEXT
+            - name: KAFKA_CLUSTERS_0_PROPERTIES_SASL_MECHANISM
+              value: SCRAM-SHA-512
+            - name: KAFKA_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: admin-password
+                  key: password
+            - name: KAFKA_CLUSTERS_0_PROPERTIES_SASL_JAAS_CONFIG
+              value: >-
+                org.apache.kafka.common.security.scram.ScramLoginModule required
+                username="admin"
+                password="$(KAFKA_ADMIN_PASSWORD)";
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka-ui
+  namespace: {{ include "kafka-lab.namespace" . }}
+  labels:
+    app: kafka-ui
+    {{- include "kafka-lab.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.kafkaUi.service.type }}
+  ports:
+    - port: 8080
+      targetPort: 8080
+      {{- if eq .Values.kafkaUi.service.type "NodePort" }}
+      nodePort: {{ .Values.kafkaUi.service.nodePort }}
+      {{- end }}
+  selector:
+    app: kafka-ui
+{{- end }}

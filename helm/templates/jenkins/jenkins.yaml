@@ -1,0 +1,236 @@
+{{- $j := .Values.jenkins -}}
+{{- if $j.enabled }}
+---
+{{- if $.Values.vault.enabled }}
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: jenkins-admin-secret
+  namespace: {{ .Release.Namespace | quote }}
+spec:
+  refreshInterval: {{ $.Values.vault.refreshInterval | default "1h" }}
+  secretStoreRef:
+    name: vault-backend
+    kind: SecretStore
+  target:
+    name: jenkins-admin-secret
+    creationPolicy: Owner
+    template:
+      type: Opaque
+      data:
+        admin-password: "{{ `{{ .password }}` }}"
+  data:
+    - secretKey: password
+      remoteRef:
+        key: {{ $j.vaultSecretPath }}
+        property: password
+{{- end }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: jenkins-admin
+  namespace: {{ .Release.Namespace | quote }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: jenkins-admin-binding-{{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - kind: ServiceAccount
+    name: jenkins-admin
+    namespace: {{ .Release.Namespace | quote }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: jenkins-data
+  namespace: {{ .Release.Namespace | quote }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: {{ $j.persistence.size | default "10Gi" | quote }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: jenkins-casc-config
+  namespace: {{ .Release.Namespace | quote }}
+data:
+  casc.yaml: |
+    jenkins:
+      systemMessage: "Kafka Lab Automation - Managed by JCasC"
+      numExecutors: 0
+      mode: EXCLUSIVE
+      slaveAgentPort: 50000
+      securityRealm:
+        local:
+          allowsSignup: false
+          users:
+            - id: "admin"
+              password: "${JENKINS_ADMIN_PASSWORD}"
+      authorizationStrategy:
+        loggedInUsersCanDoAnything:
+          allowAnonymousRead: false
+      clouds:
+        - kubernetes:
+            name: "kubernetes"
+            serverUrl: "https://kubernetes.default.svc"
+            skipTlsVerify: true
+            namespace: {{ .Release.Namespace | quote }}
+            jenkinsUrl: "http://jenkins.{{ .Release.Namespace }}.svc.cluster.local:8080"
+            templates:
+              - name: "kafka-agent"
+                label: "kafka-agent"
+                containers:
+                  - name: "jnlp"
+                    image: "jenkins/inbound-agent:latest"
+                    envVars:
+                      - envVar:
+                          key: "GIT_AUTHOR_NAME"
+                          value: "Jenkins"
+                      - envVar:
+                          key: "GIT_AUTHOR_EMAIL"
+                          value: "jenkins@kafka-lab.local"
+                      - envVar:
+                          key: "GIT_COMMITTER_NAME"
+                          value: "Jenkins"
+                      - envVar:
+                          key: "GIT_COMMITTER_EMAIL"
+                          value: "jenkins@kafka-lab.local"
+                  - name: "kubectl"
+                    image: "bitnami/kubectl:latest"
+                    command: "cat"
+                    ttyEnabled: true
+    unclassified:
+      location:
+        url: "http://localhost:32000/"
+    jobs:
+      - script: |
+          pipelineJob('01-Kafka-Manage-Topic') {
+            definition {
+              cpsScm {
+                scm {
+                  git {
+                    remote { url('https://github.com/Gabro-devops/kafka-kube.git') }
+                    branch('main')
+                    extensions {
+                      cloneOptions { shallow(true); noTags(true) }
+                    }
+                  }
+                }
+                scriptPath('jenkins/pipelines/01-manage-topic.groovy')
+              }
+            }
+          }
+          pipelineJob('02-Kafka-Manage-User') {
+            definition {
+              cpsScm {
+                scm {
+                  git {
+                    remote { url('https://github.com/Gabro-devops/kafka-kube.git') }
+                    branch('main')
+                    extensions {
+                      cloneOptions { shallow(true); noTags(true) }
+                    }
+                  }
+                }
+                scriptPath('jenkins/pipelines/02-manage-user.groovy')
+              }
+            }
+          }
+          pipelineJob('03-Kafka-Cluster-Health') {
+            triggers { cron('H/30 * * * *') }
+            definition {
+              cpsScm {
+                scm {
+                  git {
+                    remote { url('https://github.com/Gabro-devops/kafka-kube.git') }
+                    branch('main')
+                    extensions {
+                      cloneOptions { shallow(true); noTags(true) }
+                    }
+                  }
+                }
+                scriptPath('jenkins/pipelines/03-cluster-health.groovy')
+              }
+            }
+          }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jenkins
+  namespace: {{ .Release.Namespace | quote }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: jenkins
+  template:
+    metadata:
+      labels:
+        app: jenkins
+    spec:
+      serviceAccountName: jenkins-admin
+      securityContext:
+        fsGroup: 1000
+        runAsUser: 1000
+      containers:
+        - name: jenkins
+          image: {{ $j.image | default "jenkins/jenkins:lts-jdk17" | quote }}
+          ports:
+            - containerPort: 8080
+            - containerPort: 50000
+          env:
+            - name: JAVA_OPTS
+              value: "-Djenkins.install.runSetupWizard=false -Xmx1536m -Xms512m -Djenkins.model.Jenkins.slaveAgentPort=50000"
+            - name: CASC_JENKINS_CONFIG
+              value: "/var/jenkins_config/casc.yaml"
+            - name: JENKINS_ADMIN_PASSWORD
+              {{- if $.Values.vault.enabled }}
+              valueFrom:
+                secretKeyRef:
+                  name: jenkins-admin-secret
+                  key: admin-password
+              {{- else }}
+              value: "changeme"
+              {{- end }}
+          volumeMounts:
+            - name: jenkins-data
+              mountPath: /var/jenkins_home
+            - name: jenkins-config
+              mountPath: /var/jenkins_config
+      volumes:
+        - name: jenkins-data
+          persistentVolumeClaim:
+            claimName: jenkins-data
+        - name: jenkins-config
+          configMap:
+            name: jenkins-casc-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: jenkins
+  namespace: {{ .Release.Namespace | quote }}
+spec:
+  type: NodePort
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      nodePort: {{ $j.service.nodePort | default 32000 }}
+    - name: agent
+      port: 50000
+      targetPort: 50000
+  selector:
+    app: jenkins
+{{- end }}

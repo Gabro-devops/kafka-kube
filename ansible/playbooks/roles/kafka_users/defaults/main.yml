@@ -1,0 +1,6 @@
+---
+k8s_namespace: kafka-lab
+kafka_cluster_name: kafka-cluster
+kafka_username: "new-user"
+kafka_password: "new-password"
+kafka_user_action: "list"

@@ -1,0 +1,12 @@
+apiVersion: v2
+name: kafka-lab
+description: Kafka Lab - Enterprise Kafka with Strimzi Operator (KRaft mode)
+type: application
+version: 2.0.0
+appVersion: "3.9.0"
+
+dependencies:
+  - name: awx-operator
+    version: "2.19.1"
+    repository: "https://ansible-community.github.io/awx-operator-helm/"
+    condition: awx.enabled

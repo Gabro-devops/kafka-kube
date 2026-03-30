@@ -1,0 +1,437 @@
+# ============================================================================
+# VAULT CONFIGURATION EXAMPLES
+# ============================================================================
+# Esempi di configurazione Vault per diversi scenari
+# Copia la sezione appropriata in values.yaml
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# SCENARIO 1: LAB / DEVELOPMENT
+# ----------------------------------------------------------------------------
+# Vault deployato in Kubernetes in dev mode
+# - Single replica
+# - In-memory storage
+# - No TLS
+# - Auto-unseal
+
+lab_config:
+ vault:
+ enabled: true
+ address: "http://vault.vault-system.svc.cluster.local:8200"
+ kvPath: "secret/data/kafka"
+ auth:
+ method: kubernetes
+ serviceAccount: vault-auth
+ role: kafka-lab
+ refreshInterval: 1h
+
+# Deploy Vault per LAB:
+# helm install vault hashicorp/vault \
+# --namespace vault-system \
+# --create-namespace \
+# --set server.dev.enabled=true \
+# --set server.dev.devRootToken=root \
+# --set ui.enabled=true \
+# --set ui.serviceType=NodePort
+
+# ----------------------------------------------------------------------------
+# SCENARIO 2: STAGING
+# ----------------------------------------------------------------------------
+# Vault deployato in Kubernetes con HA
+# - 3 replicas
+# - Persistent storage
+# - TLS enabled
+# - Manual unseal
+# - Audit logging
+
+staging_config:
+ vault:
+ enabled: true
+ address: "https://vault.vault-system.svc.cluster.local:8200"
+ kvPath: "secret/data/kafka-staging"
+ auth:
+ method: kubernetes
+ serviceAccount: vault-auth
+ role: kafka-staging
+ refreshInterval: 30m
+ # TLS verification
+ caBundleSecretRef:
+ name: vault-ca-bundle
+ key: ca.crt
+
+# Deploy Vault per STAGING:
+# helm install vault hashicorp/vault \
+# --namespace vault-system \
+# --values vault-ha-values.yaml
+
+# vault-ha-values.yaml:
+# server:
+# ha:
+# enabled: true
+# replicas: 3
+# raft:
+# enabled: true
+# dataStorage:
+# enabled: true
+# size: 10Gi
+# storageClass: fast-ssd
+# auditStorage:
+# enabled: true
+# size: 5Gi
+
+# ----------------------------------------------------------------------------
+# SCENARIO 3: PRODUCTION
+# ----------------------------------------------------------------------------
+# Vault esterno (managed service o cluster dedicato)
+# - External Vault cluster
+# - TLS con certificate verification
+# - AppRole auth (più sicuro di kubernetes auth)
+# - Refresh rapido
+# - Namespace dedicato per secrets
+
+production_config:
+ vault:
+ enabled: true
+ # Vault esterno con Load Balancer
+ address: "https://vault.company.com:8200"
+ kvPath: "secret/data/kafka-prod"
+ auth:
+ # In produzione, considera AppRole invece di kubernetes
+ method: kubernetes
+ serviceAccount: vault-auth
+ role: kafka-production
+ # Oppure con AppRole:
+ # method: approle
+ # approle:
+ # roleId: "your-role-id"
+ # secretRef:
+ # name: vault-approle-secret
+ # key: secretId
+ refreshInterval: 15m
+ # TLS mandatory
+ caBundleSecretRef:
+ name: vault-ca-bundle
+ key: ca.crt
+ # Namespace Vault dedicato
+ namespace: "kafka-production"
+
+# Policy Vault per PRODUZIONE (più restrittiva):
+# path "secret/data/kafka-prod/users/admin" {
+# capabilities = ["read"]
+# }
+# 
+# path "secret/data/kafka-prod/users/producer-*" {
+# capabilities = ["read"]
+# }
+#
+# # Deny tutto il resto
+# path "secret/data/*" {
+# capabilities = ["deny"]
+# }
+
+# ----------------------------------------------------------------------------
+# SCENARIO 4: MULTI-REGION
+# ----------------------------------------------------------------------------
+# Vault replication per disaster recovery
+# - Primary region
+# - DR region con performance replica
+
+multi_region_config:
+ vault:
+ enabled: true
+ # Primary Vault
+ address: "https://vault-primary.region1.company.com:8200"
+ # Fallback a DR region (configurato in ESO)
+ fallbackAddress: "https://vault-dr.region2.company.com:8200"
+ kvPath: "secret/data/kafka"
+ auth:
+ method: kubernetes
+ serviceAccount: vault-auth
+ role: kafka-lab
+ refreshInterval: 10m
+ # Retry configuration per failover
+ retrySettings:
+ maxRetries: 3
+ retryInterval: 30s
+
+# ----------------------------------------------------------------------------
+# SCENARIO 5: VAULT AGENT SIDECAR
+# ----------------------------------------------------------------------------
+# Usa Vault Agent come sidecar per caching locale
+# - Riduce latency
+# - Migliora availability
+# - Cache locale dei secret
+
+agent_sidecar_config:
+ vault:
+ enabled: true
+ # Punta a Vault Agent locale
+ address: "http://127.0.0.1:8200"
+ kvPath: "secret/data/kafka"
+ auth:
+ method: kubernetes
+ serviceAccount: vault-auth
+ role: kafka-lab
+ refreshInterval: 5m
+
+# Configura Vault Agent come init container:
+# initContainers:
+# - name: vault-agent
+# image: vault:latest
+# args:
+# - agent
+# - -config=/vault/config/agent.hcl
+
+# ----------------------------------------------------------------------------
+# SCENARIO 6: HYBRID (Vault + Kubernetes Secrets fallback)
+# ----------------------------------------------------------------------------
+# Supporta sia Vault che secret K8s nativi
+# - Utile per migrazione graduale
+# - Fallback se Vault non disponibile
+
+hybrid_config:
+ vault:
+ enabled: true # Prova prima Vault
+ address: "http://vault.vault-system.svc.cluster.local:8200"
+ kvPath: "secret/data/kafka"
+ auth:
+ method: kubernetes
+ serviceAccount: vault-auth
+ role: kafka-lab
+ refreshInterval: 1h
+ # Fallback a secret K8s se Vault fail
+ fallbackToK8sSecrets: true
+
+# Mantieni anche password in values.yaml come fallback:
+# kafkaUsers:
+# - name: admin
+# password: "fallback-password" # Usato solo se Vault non disponibile
+# vaultSecretPath: users/admin # Preferito se Vault disponibile
+
+# ----------------------------------------------------------------------------
+# SCENARIO 7: SECRET ROTATION AUTOMATICA
+# ----------------------------------------------------------------------------
+# Configura rotation automatica dei secret
+
+rotation_config:
+ vault:
+ enabled: true
+ address: "http://vault.vault-system.svc.cluster.local:8200"
+ kvPath: "secret/data/kafka"
+ auth:
+ method: kubernetes
+ serviceAccount: vault-auth
+ role: kafka-lab
+ # Refresh molto frequente per rotation rapida
+ refreshInterval: 5m
+
+ # Abilita rotation automatica
+ secretRotation:
+ enabled: true
+ # CronJob per rotation
+ schedule: "0 2 * * 0" # Ogni domenica alle 2AM
+ # Notifiche pre-rotation
+ notifyBeforeRotation: 24h
+ # Slack webhook per notifiche
+ notificationWebhook: "https://hooks.slack.com/services/YOUR/WEBHOOK"
+
+# ----------------------------------------------------------------------------
+# SCENARIO 8: MULTI-TENANT
+# ----------------------------------------------------------------------------
+# Più team con namespace separati
+
+multi_tenant_config:
+ vault:
+ enabled: true
+ address: "http://vault.vault-system.svc.cluster.local:8200"
+ # Path specifico per team
+ kvPath: "secret/data/team-alpha/kafka"
+ auth:
+ method: kubernetes
+ # ServiceAccount specifico per team
+ serviceAccount: vault-auth-team-alpha
+ # Role specifico per team
+ role: kafka-team-alpha
+ refreshInterval: 30m
+
+# Policy per TEAM ALPHA:
+# path "secret/data/team-alpha/kafka/*" {
+# capabilities = ["read", "list"]
+# }
+#
+# path "secret/data/team-beta/*" {
+# capabilities = ["deny"]
+# }
+
+# ----------------------------------------------------------------------------
+# SCENARIO 9: COMPLIANCE & AUDIT
+# ----------------------------------------------------------------------------
+# Massima sicurezza e compliance
+
+compliance_config:
+ vault:
+ enabled: true
+ address: "https://vault.company.com:8200"
+ kvPath: "secret/data/kafka-pci"
+ auth:
+ method: kubernetes
+ serviceAccount: vault-auth
+ role: kafka-pci-compliant
+ refreshInterval: 10m
+ # TLS con cert verification
+ caBundleSecretRef:
+ name: vault-ca-bundle
+ key: ca.crt
+ # Namespace Vault dedicato
+ namespace: "pci-compliance"
+ # Audit logging
+ audit:
+ enabled: true
+ destination: "syslog://audit-server:514"
+ # Encryption in transit mandatory
+ tlsVerify: true
+ # Secrets versioning enabled
+ versioning: true
+ # Retention policy
+ retentionPolicy:
+ minVersions: 5
+ deleteVersionAfter: 90d
+
+# ----------------------------------------------------------------------------
+# CONFIGURAZIONE EXTERNAL SECRETS OPERATOR
+# ----------------------------------------------------------------------------
+# Settings avanzati per ESO
+
+eso_advanced_config:
+ externalSecrets:
+ # Retry logic
+ retrySettings:
+ maxRetries: 5
+ retryDelay: 10s
+ retryDelayMax: 5m
+
+ # Metrics
+ metrics:
+ enabled: true
+ serviceMonitor:
+ enabled: true
+
+ # Resource limits
+ resources:
+ limits:
+ cpu: 200m
+ memory: 256Mi
+ requests:
+ cpu: 100m
+ memory: 128Mi
+
+ # Webhook per validazione
+ webhook:
+ enabled: true
+
+ # ClusterSecretStore per multi-namespace
+ clusterSecretStore:
+ enabled: true
+ name: vault-backend-global
+
+# ----------------------------------------------------------------------------
+# ESEMPI DI POLICY VAULT
+# ----------------------------------------------------------------------------
+
+# POLICY BASE (read-only su un path)
+policy_readonly: |
+ path "secret/data/kafka/users/*" {
+ capabilities = ["read", "list"]
+ }
+
+# POLICY ADMIN (read-write)
+policy_admin: |
+ path "secret/data/kafka/*" {
+ capabilities = ["create", "read", "update", "delete", "list"]
+ }
+
+ path "secret/metadata/kafka/*" {
+ capabilities = ["list", "read"]
+ }
+
+# POLICY PER CI/CD (rotation automatica)
+policy_cicd: |
+ path "secret/data/kafka/users/*" {
+ capabilities = ["create", "update"]
+ }
+
+ # Può leggere per verifica ma non cancellare
+ path "secret/data/kafka/users/*" {
+ capabilities = ["read"]
+ }
+
+# POLICY LEAST PRIVILEGE (per singolo secret)
+policy_least_privilege: |
+ # Solo questo specifico secret
+ path "secret/data/kafka/users/producer-user" {
+ capabilities = ["read"]
+ }
+
+ # Deny esplicito su tutto il resto
+ path "secret/data/*" {
+ capabilities = ["deny"]
+ }
+
+# ----------------------------------------------------------------------------
+# COMANDI UTILI
+# ----------------------------------------------------------------------------
+
+# Verifica configurazione Vault:
+# vault read auth/kubernetes/config
+
+# Lista secret:
+# vault kv list secret/kafka/users
+
+# Leggi secret con metadati:
+# vault kv get -format=json secret/kafka/users/admin
+
+# Versioning secret:
+# vault kv get -version=2 secret/kafka/users/admin
+# vault kv metadata get secret/kafka/users/admin
+
+# Rollback a versione precedente:
+# vault kv rollback -version=2 secret/kafka/users/admin
+
+# Audit logs:
+# vault audit list
+# vault audit enable file file_path=/vault/audit/audit.log
+
+# Token info:
+# vault token lookup
+
+# Policy test:
+# vault policy read kafka-lab
+# vault token capabilities secret/data/kafka/users/admin
+
+# ----------------------------------------------------------------------------
+# MONITORING & ALERTING
+# ----------------------------------------------------------------------------
+
+# Metriche Prometheus per Vault:
+# vault_core_unsealed
+# vault_core_active
+# vault_runtime_total_gc_pause_ns
+# vault_expire_num_leases
+
+# Metriche ESO:
+# externalsecret_sync_calls_total
+# externalsecret_sync_calls_error
+# externalsecret_status_condition
+
+# Alert esempio (Prometheus):
+# - alert: VaultSealed
+# expr: vault_core_unsealed == 0
+# for: 5m
+# annotations:
+# summary: "Vault is sealed"
+#
+# - alert: ExternalSecretSyncFailure
+# expr: rate(externalsecret_sync_calls_error[5m]) > 0.1
+# for: 10m
+# annotations:
+# summary: "External Secret sync failing"

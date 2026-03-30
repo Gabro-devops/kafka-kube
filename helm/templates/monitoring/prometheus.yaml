@@ -1,0 +1,91 @@
+{{- if .Values.monitoring.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: {{ include "kafka-lab.namespace" . }}
+  labels:
+    {{- include "kafka-lab.labels" . | nindent 4 }}
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+
+    scrape_configs:
+      - job_name: 'kafka'
+        static_configs:
+          - targets:
+            {{- range $i := until (int .Values.kafka.nodePool.replicas) }}
+            - '{{ $.Values.kafka.name }}-{{ $.Values.kafka.nodePool.name }}-{{ $i }}.{{ $.Values.kafka.name }}-kafka-brokers:9404'
+            {{- end }}
+      - job_name: 'kafka-exporter'
+        static_configs:
+          - targets:
+            - 'kafka-exporter:9308'
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+  namespace: {{ include "kafka-lab.namespace" . }}
+  labels:
+    app: prometheus
+    {{- include "kafka-lab.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: prometheus
+  template:
+    metadata:
+      labels:
+        app: prometheus
+    spec:
+      containers:
+        - name: prometheus
+          image: {{ .Values.monitoring.prometheus.image }}
+          ports:
+            - containerPort: 9090
+          args:
+            - "--config.file=/etc/prometheus/prometheus.yml"
+            - "--storage.tsdb.path=/prometheus"
+            - "--web.enable-lifecycle"
+          volumeMounts:
+            - name: config
+              mountPath: /etc/prometheus
+            - name: data
+              mountPath: /prometheus
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+      volumes:
+        - name: config
+          configMap:
+            name: prometheus-config
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+  namespace: {{ include "kafka-lab.namespace" . }}
+  labels:
+    app: prometheus
+    {{- include "kafka-lab.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.monitoring.prometheus.service.type }}
+  ports:
+    - port: 9090
+      targetPort: 9090
+      {{- if eq .Values.monitoring.prometheus.service.type "NodePort" }}
+      nodePort: {{ .Values.monitoring.prometheus.service.nodePort }}
+      {{- end }}
+  selector:
+    app: prometheus
+{{- end }}

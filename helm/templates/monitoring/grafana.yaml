@@ -1,0 +1,282 @@
+{{- if .Values.monitoring.enabled }}
+{{- if .Values.vault.enabled }}
+---
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: grafana-admin-secret
+  namespace: {{ include "kafka-lab.namespace" . }}
+  labels:
+    {{- include "kafka-lab.labels" . | nindent 4 }}
+    app.kubernetes.io/component: monitoring
+spec:
+  refreshInterval: {{ .Values.vault.refreshInterval | default "1h" }}
+  secretStoreRef:
+    name: vault-backend
+    kind: SecretStore
+  target:
+    name: grafana-admin-secret
+    creationPolicy: Owner
+    template:
+      type: Opaque
+      data:
+        admin-password: "{{ `{{ .password }}` }}"
+  data:
+    - secretKey: password
+      remoteRef:
+        key: {{ .Values.monitoring.grafana.vaultSecretPath }}
+        property: password
+{{- end }}
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasources
+  namespace: {{ include "kafka-lab.namespace" . }}
+  labels:
+    {{- include "kafka-lab.labels" . | nindent 4 }}
+data:
+  datasources.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        access: proxy
+        url: http://prometheus:9090
+        isDefault: true
+        uid: prometheus
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-provider
+  namespace: {{ include "kafka-lab.namespace" . }}
+  labels:
+    {{- include "kafka-lab.labels" . | nindent 4 }}
+data:
+  dashboards.yaml: |
+    apiVersion: 1
+    providers:
+      - name: kafka
+        orgId: 1
+        folder: Kafka
+        type: file
+        disableDeletion: false
+        editable: true
+        updateIntervalSeconds: 30
+        options:
+          path: /var/lib/grafana/dashboards
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-kafka-dashboard
+  namespace: {{ include "kafka-lab.namespace" . }}
+  labels:
+    {{- include "kafka-lab.labels" . | nindent 4 }}
+data:
+  kafka-overview.json: |
+    {
+      "title": "Kafka Overview",
+      "uid": "kafka-overview",
+      "schemaVersion": 36,
+      "version": 1,
+      "refresh": "30s",
+      "time": { "from": "now-1h", "to": "now" },
+      "panels": [
+        {
+          "id": 1,
+          "title": "Messages In Per Second",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "sum(rate(kafka_topic_partition_current_offset[5m])) by (topic)",
+              "legendFormat": "{{ `{{topic}}` }}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 2,
+          "title": "Topic Current Offset",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "sum(kafka_topic_partition_current_offset) by (topic)",
+              "legendFormat": "{{ `{{topic}}` }}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 3,
+          "title": "Consumer Group Lag",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "sum(kafka_consumergroup_lag) by (consumergroup, topic)",
+              "legendFormat": "{{ `{{consumergroup}}` }} - {{ `{{topic}}` }}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 4,
+          "title": "Partitions per Topic",
+          "type": "bargauge",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "count(kafka_topic_partition_current_offset) by (topic)",
+              "legendFormat": "{{ `{{topic}}` }}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 5,
+          "title": "Active Brokers",
+          "type": "stat",
+          "gridPos": { "h": 4, "w": 6, "x": 0, "y": 16 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "kafka_brokers",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 6,
+          "title": "Total Topics",
+          "type": "stat",
+          "gridPos": { "h": 4, "w": 6, "x": 6, "y": 16 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "count(count by (topic)(kafka_topic_partition_current_offset))",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 7,
+          "title": "In Sync Replicas",
+          "type": "stat",
+          "gridPos": { "h": 4, "w": 6, "x": 12, "y": 16 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "sum(kafka_topic_partition_in_sync_replica)",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 8,
+          "title": "Partition Leaders",
+          "type": "stat",
+          "gridPos": { "h": 4, "w": 6, "x": 18, "y": 16 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "expr": "sum(kafka_topic_partition_leader)",
+              "refId": "A"
+            }
+          ]
+        }
+      ]
+    }
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: {{ include "kafka-lab.namespace" . }}
+  labels:
+    app: grafana
+    {{- include "kafka-lab.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+    spec:
+      containers:
+        - name: grafana
+          image: {{ .Values.monitoring.grafana.image }}
+          ports:
+            - containerPort: 3000
+          env:
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              {{- if .Values.vault.enabled }}
+              valueFrom:
+                secretKeyRef:
+                  name: grafana-admin-secret
+                  key: admin-password
+              {{- else }}
+              value: "changeme"
+              {{- end }}
+            - name: GF_USERS_ALLOW_SIGN_UP
+              value: "false"
+            - name: GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH
+              value: "/var/lib/grafana/dashboards/kafka-overview.json"
+          volumeMounts:
+            - name: datasources
+              mountPath: /etc/grafana/provisioning/datasources
+            - name: dashboard-provider
+              mountPath: /etc/grafana/provisioning/dashboards
+            - name: kafka-dashboard
+              mountPath: /var/lib/grafana/dashboards
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+      volumes:
+        - name: datasources
+          configMap:
+            name: grafana-datasources
+        - name: dashboard-provider
+          configMap:
+            name: grafana-dashboard-provider
+        - name: kafka-dashboard
+          configMap:
+            name: grafana-kafka-dashboard
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  namespace: {{ include "kafka-lab.namespace" . }}
+  labels:
+    app: grafana
+    {{- include "kafka-lab.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.monitoring.grafana.service.type }}
+  ports:
+    - port: 3000
+      targetPort: 3000
+      {{- if eq .Values.monitoring.grafana.service.type "NodePort" }}
+      nodePort: {{ .Values.monitoring.grafana.service.nodePort }}
+      {{- end }}
+  selector:
+    app: grafana
+{{- end }}

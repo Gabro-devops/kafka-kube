@@ -1,0 +1,80 @@
+---
+- name: List users
+  kubernetes.core.k8s_info:
+    api_version: kafka.strimzi.io/v1beta2
+    kind: KafkaUser
+    namespace: "{{ k8s_namespace }}"
+  register: users
+  when: kafka_user_action == "list"
+
+- name: Show users
+  debug:
+    msg: "User: {{ item.metadata.name }}"
+  loop: "{{ users.resources | default([]) }}"
+  loop_control:
+    label: "{{ item.metadata.name }}"
+  when: kafka_user_action == "list"
+
+- name: Create password secret
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: "{{ kafka_username }}-password"
+        namespace: "{{ k8s_namespace }}"
+      type: Opaque
+      stringData:
+        password: "{{ kafka_password }}"
+  when: kafka_user_action == "create"
+
+- name: Create user
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: kafka.strimzi.io/v1beta2
+      kind: KafkaUser
+      metadata:
+        name: "{{ kafka_username }}"
+        namespace: "{{ k8s_namespace }}"
+        labels:
+          strimzi.io/cluster: "{{ kafka_cluster_name }}"
+      spec:
+        authentication:
+          type: scram-sha-512
+          password:
+            valueFrom:
+              secretKeyRef:
+                name: "{{ kafka_username }}-password"
+                key: password
+        authorization:
+          type: simple
+          acls:
+            - resource:
+                type: topic
+                name: "*"
+                patternType: literal
+              operations:
+                - Read
+                - Describe
+              host: "*"
+  when: kafka_user_action == "create"
+
+- name: Delete user
+  kubernetes.core.k8s:
+    state: absent
+    api_version: kafka.strimzi.io/v1beta2
+    kind: KafkaUser
+    name: "{{ kafka_username }}"
+    namespace: "{{ k8s_namespace }}"
+  when: kafka_user_action == "delete"
+
+- name: Delete password secret
+  kubernetes.core.k8s:
+    state: absent
+    api_version: v1
+    kind: Secret
+    name: "{{ kafka_username }}-password"
+    namespace: "{{ k8s_namespace }}"
+  when: kafka_user_action == "delete"

@@ -1,0 +1,33 @@
+---
+- name: Kafka Create Topic
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars_files:
+    - ../group_vars/all.yml
+
+  vars:
+    kafka_topic_action: "create"
+
+  pre_tasks:
+    - name: Check params
+      assert:
+        that:
+          - kafka_topic_name is defined
+          - kafka_topic_name | length > 0
+        fail_msg: "kafka_topic_name is required!"
+
+    - name: Banner
+      debug:
+        msg:
+          - "============================================"
+          - "   KAFKA CREATE TOPIC"
+          - "============================================"
+          - "Topic: {{ kafka_topic_name }}"
+          - "Partitions: {{ kafka_topic_partitions | default(3) }}"
+          - "Replicas: {{ kafka_topic_replicas | default(3) }}"
+          - "============================================"
+
+  roles:
+    - role: kafka_topics

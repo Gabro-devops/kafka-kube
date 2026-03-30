@@ -1,0 +1,14 @@
+{{- if .Values.awx.enabled }}
+apiVersion: awx.ansible.com/v1beta1
+kind: AWX
+metadata:
+  name: awx
+  namespace: {{ include "kafka-lab.namespace" . }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  service_type: {{ .Values.awx.service.type }}
+  {{- if eq .Values.awx.service.type "NodePort" }}
+  nodeport_port: {{ .Values.awx.service.nodePort }}
+  {{- end }}
+{{- end }}

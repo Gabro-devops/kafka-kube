@@ -1,0 +1,21 @@
+---
+- name: Kafka Manage ACL
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars_files:
+    - ../group_vars/all.yml
+
+  pre_tasks:
+    - name: Banner
+      debug:
+        msg:
+          - "============================================"
+          - "   KAFKA MANAGE ACL"
+          - "============================================"
+          - "User: {{ kafka_username | default('all') }}"
+          - "============================================"
+
+  roles:
+    - role: kafka_acl

@@ -1,0 +1,80 @@
+{{- if .Values.kafkaConnect.enabled }}
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  name: kafka-connect
+  namespace: {{ include "kafka-lab.namespace" . }}
+  labels:
+    strimzi.io/cluster: {{ .Values.kafka.name }}
+spec:
+  authentication:
+    type: scram-sha-512
+  authorization:
+    type: simple
+    acls:
+      - resource:
+          type: topic
+          name: "*"
+          patternType: literal
+        operations: [All]
+      - resource:
+          type: group
+          name: "*"
+          patternType: literal
+        operations: [All]
+      - resource:
+          type: cluster
+        operations: [All]
+
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaConnect
+metadata:
+  name: kafka-connect
+  namespace: {{ include "kafka-lab.namespace" . }}
+  annotations:
+    strimzi.io/use-connector-resources: "true"
+spec:
+  version: 4.1.0
+  replicas: {{ .Values.kafkaConnect.replicas | default 1 }}
+  bootstrapServers: {{ .Values.kafka.name }}-kafka-bootstrap:9093
+  build:
+    output:
+      type: docker
+      image: ttl.sh/kafka-connect-{{ .Values.kafka.name }}:24h
+    plugins:
+      - name: kafka-connect-file
+        artifacts:
+          - type: jar
+            url: https://repo1.maven.org/maven2/org/apache/kafka/connect-file/3.6.1/connect-file-3.6.1.jar
+  groupId: connect-cluster
+  offsetStorageTopic: connect-cluster-offsets
+  configStorageTopic: connect-cluster-configs
+  statusStorageTopic: connect-cluster-status
+  tls:
+    trustedCertificates:
+      - secretName: {{ .Values.kafka.name }}-cluster-ca-cert
+        certificate: ca.crt
+  authentication:
+    type: scram-sha-512
+    username: kafka-connect
+    passwordSecret:
+      secretName: kafka-connect
+      password: password
+  config:
+    offset.storage.replication.factor: 1
+    config.storage.replication.factor: 1
+    status.storage.replication.factor: 1
+    key.converter: org.apache.kafka.connect.json.JsonConverter
+    value.converter: org.apache.kafka.connect.json.JsonConverter
+    key.converter.schemas.enable: false
+    value.converter.schemas.enable: false
+  resources:
+    requests:
+      memory: {{ .Values.kafkaConnect.resources.requests.memory | default "512Mi" }}
+      cpu: {{ .Values.kafkaConnect.resources.requests.cpu | default "250m" }}
+    limits:
+      memory: {{ .Values.kafkaConnect.resources.limits.memory | default "1Gi" }}
+      cpu: {{ .Values.kafkaConnect.resources.limits.cpu | default "500m" }}
+{{- end }}

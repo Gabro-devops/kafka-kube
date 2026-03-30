@@ -1,0 +1,44 @@
+{{- if .Values.kafka.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kafka-metrics
+  namespace: {{ include "kafka-lab.namespace" . }}
+  labels:
+    {{- include "kafka-lab.labels" . | nindent 4 }}
+data:
+  kafka-metrics-config.yml: |
+    lowercaseOutputName: true
+    lowercaseOutputLabelNames: true
+    rules:
+      - pattern: kafka.server<type=(.+), name=(.+)><>Value
+        name: kafka_server_$1_$2
+        type: GAUGE
+      - pattern: kafka.server<type=(.+), name=(.+)PerSec\w*><>Count
+        name: kafka_server_$1_$2_total
+        type: COUNTER
+      - pattern: kafka.server<type=(.+), name=(.+), clientId=(.+), topic=(.+), partition=(.*)><>Value
+        name: kafka_server_$1_$2
+        type: GAUGE
+        labels:
+          clientId: "$3"
+          topic: "$4"
+          partition: "$5"
+      - pattern: kafka.controller<type=(.+), name=(.+)><>Value
+        name: kafka_controller_$1_$2
+        type: GAUGE
+      - pattern: kafka.controller<type=(.+), name=(.+)><>Count
+        name: kafka_controller_$1_$2_count
+        type: COUNTER
+      - pattern: kafka.network<type=(.+), name=(.+), request=(.+)><>Count
+        name: kafka_network_$1_$2_count
+        type: COUNTER
+        labels:
+          request: "$3"
+      - pattern: kafka.network<type=(.+), name=(.+)><>Value
+        name: kafka_network_$1_$2
+        type: GAUGE
+      - pattern: kafka.log<type=(.+), name=(.+)><>Value
+        name: kafka_log_$1_$2
+        type: GAUGE
+{{- end }}

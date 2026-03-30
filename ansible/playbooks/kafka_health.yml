@@ -1,0 +1,30 @@
+---
+- name: Kafka Health Check
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars_files:
+    - ../group_vars/all.yml
+
+  pre_tasks:
+    - name: Banner
+      debug:
+        msg:
+          - "============================================"
+          - "   KAFKA HEALTH CHECK - KRaft Mode"
+          - "============================================"
+          - "Cluster: {{ kafka_cluster_name }}"
+          - "Namespace: {{ k8s_namespace }}"
+          - "============================================"
+
+  roles:
+    - role: kafka_health
+
+  post_tasks:
+    - name: URLs
+      debug:
+        msg:
+          - "  Kafka UI:   {{ kafka_ui_url }}"
+          - "  Grafana:    {{ grafana_url }}"
+          - "  Prometheus: {{ prometheus_url }}"
